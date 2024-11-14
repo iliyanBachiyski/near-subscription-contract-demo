@@ -106,9 +106,23 @@ class Subscription {
   }
 
   @call({})
-  remove_subscription({ account }: { account: string }) {
-    // TODO: validate the account here - it should match the sender and should exist in the map
-    this.subscriptions.remove(account);
+  remove_subscription() {
+    const caller = near.predecessorAccountId();
+    // Assert that the caller has a subscription
+    assert(
+      this.subscriptions.containsKey(caller),
+      "Subscription does not exists"
+    );
+    // Assert that the subscription is active
+    assert(
+      this.subscriptions.get(caller).status === SubscriptionStatus.active,
+      "Subscription is not active"
+    );
+    const subscription: SubscriptionType = {
+      ...this.subscriptions.get(caller),
+      status: SubscriptionStatus.inactive,
+    };
+    this.subscriptions.set(caller, subscription);
   }
 
   @view({})

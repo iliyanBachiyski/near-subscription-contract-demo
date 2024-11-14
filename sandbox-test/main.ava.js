@@ -122,3 +122,20 @@ test("Add subscription", async (t) => {
   t.is(subscription.paymentDuration, 2);
   t.is(subscription.nextPayment - subscription.lastPayment, YEAR_DURATION);
 });
+
+test("Remove subscription", async (t) => {
+  const { alice, contract } = t.context.accounts;
+  await alice.call(contract, "add_subscription", {
+    plan: 3,
+    paymentDuration: 2,
+  });
+  let subscription = await contract.view("get_account_subscription", {
+    account: alice.accountId,
+  });
+  t.is(subscription.status, 1);
+  await alice.call(contract, "remove_subscription", {});
+  const updatedSubscription = await contract.view("get_account_subscription", {
+    account: alice.accountId,
+  });
+  t.is(updatedSubscription.status, 2);
+});
