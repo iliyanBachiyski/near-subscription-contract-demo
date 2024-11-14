@@ -9,38 +9,15 @@ import {
   near,
 } from "near-sdk-js";
 
-enum PaymentDuration {
-  monthly = 30 * 24 * 60 * 60 * 1000 * 1000 * 1000, // 30 days in nanoseconds
-  yearly = 365 * 24 * 60 * 60 * 1000 * 1000 * 1000, // 365 days in nanoseconds
-}
-
-enum Plan {
-  basic = 1,
-  standard = 2,
-  premium = 3,
-}
-
-interface PriceType {
-  [key: number]: { amount: number; token: string }; // Validate key and token - key should mach one of the Plan values and token should be one of the supported tokens
-}
-
-enum SubscriptionStatus {
-  active = 1,
-  inactive = 2,
-}
-
-type AddSubscriptionRequest = {
-  plan: Plan;
-  paymentDuration: PaymentDuration;
-};
-
-type SubscriptionType = {
-  plan: Plan;
-  paymentDuration: PaymentDuration;
-  lastPayment: bigint; // Unix timestamp in nanoseconds
-  nextPayment: bigint; // Unix timestamp in nanoseconds
-  status: SubscriptionStatus;
-};
+import {
+  SubscriptionType,
+  PriceType,
+  AddSubscriptionRequest,
+  Plan,
+  PaymentDuration,
+  SubscriptionStatus,
+  DURATION_MAP,
+} from "./types";
 
 @NearBindgen({})
 class Subscription {
@@ -49,9 +26,9 @@ class Subscription {
       class: LookupMap,
       value: {
         plan: "u8",
-        paymentDuration: BigInt,
-        lastPayment: BigInt,
-        nextPayment: BigInt,
+        paymentDuration: "bigint",
+        lastPayment: "bigint",
+        nextPayment: "bigint",
         status: "u8",
       },
     },
@@ -76,11 +53,13 @@ class Subscription {
     prices,
     supported_tokens,
   }: {
-    prices: LookupMap<PriceType>;
+    prices: { [key: number]: PriceType };
     supported_tokens: string[];
   }) {
     this.supported_tokens = supported_tokens; // ["NEAR", "USDC", "DAI"]
-    this.prices = prices;
+    Object.keys(prices).forEach((key) => {
+      this.prices.set(key, prices[parseInt(key)]);
+    });
   }
 
   @call({ privateFunction: true })
@@ -90,28 +69,20 @@ class Subscription {
   }
 
   @call({ privateFunction: true })
-  update_prices({ value }: { value: LookupMap<PriceType> }) {
-    // TODO: validate params here
-    this.prices = value;
+  update_prices({ value }: { value: { [key: number]: PriceType } }) {
+    Object.keys(value).forEach((key) => {
+      this.prices.set(key, value[parseInt(key)]);
+    });
   }
 
   @call({})
-  add_subscription({
-    key,
-    value,
-  }: {
-    key: string;
-    value: AddSubscriptionRequest;
-  }) {
+  add_subscription({ plan, paymentDuration }: AddSubscriptionRequest) {
     const caller = near.predecessorAccountId();
-    // Assert that the caller is the same as the key
-    assert(caller === key, "Can not add subscription for another account");
     // Assert that the caller is not already in the map
     assert(
       !this.subscriptions.containsKey(caller),
       "Subscription already exists"
     );
-    const { plan, paymentDuration } = value;
     // Assert that the plan is valid
     assert(Object.values(Plan).includes(plan), "Invalid plan");
     // Assert that the paymentDuration is valid
@@ -127,10 +98,11 @@ class Subscription {
       plan,
       paymentDuration,
       lastPayment: blockTimestamp,
-      nextPayment: blockTimestamp + BigInt(paymentDuration.toString()),
+      nextPayment:
+        blockTimestamp + BigInt(DURATION_MAP[paymentDuration].toString()),
       status: SubscriptionStatus.active,
     };
-    this.subscriptions.set(key, subscription);
+    this.subscriptions.set(caller, subscription);
   }
 
   @call({})
@@ -142,5 +114,15 @@ class Subscription {
   @view({})
   get_account_subscription({ account }: { account: string }): SubscriptionType {
     return this.subscriptions.get(account);
+  }
+
+  @view({})
+  get_price_by_plan({ plan }: { plan: Plan }): PriceType {
+    return this.prices.get(plan.toString());
+  }
+
+  @view({})
+  get_supported_tokens(): string[] {
+    return this.supported_tokens;
   }
 }
