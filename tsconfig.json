@@ -5,6 +5,6 @@
     "noEmit": true,
     "noImplicitAny": false
   },
-  "files": ["src/contract.ts"],
+  "files": ["src/contract.ts", "src/contractV2.ts"],
   "exclude": ["node_modules"]
 }

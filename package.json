@@ -4,8 +4,8 @@
   "license": "(MIT AND Apache-2.0)",
   "type": "module",
   "scripts": {
-    "build": "near-sdk-js build src/contract.ts build/subscription.wasm",
-    "test": "$npm_execpath run build && ava -- ./build/subscription.wasm"
+    "build": "near-sdk-js build src/contract.ts build/subscription.wasm && near-sdk-js build src/contractV2.ts build/subscriptionV2.wasm",
+    "test": "$npm_execpath run build && ava -- ./build/subscription.wasm ./build/subscriptionV2.wasm"
   },
   "dependencies": {
     "near-sdk-js": "2.0.0"
