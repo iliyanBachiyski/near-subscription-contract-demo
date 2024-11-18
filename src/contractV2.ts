@@ -10,7 +10,7 @@ import {
   NearPromise,
 } from "near-sdk-js";
 
-import { Plan, SubscriptionStatus, FEE_MIN } from "./types";
+import { Plan, SubscriptionStatus } from "./types";
 import { AddSubscriptionRequest, Subscription } from "./model";
 /**
  * Subscription contract that allows users to subscribe to a service provider and make payments based on the subscription plan.
@@ -43,7 +43,6 @@ class SubscriptionContract {
   init({ providerAddress, fee }: { providerAddress: string; fee: number }) {
     // TODO: Validate provider address
     this.providerAddress = providerAddress;
-    assert(fee >= FEE_MIN, `Fee should be bigger or equal to ${FEE_MIN}`);
     this.fee = fee;
   }
 
@@ -73,7 +72,8 @@ class SubscriptionContract {
       nextPayment: blockTimestamp + paymentDuration,
     });
     // Calculate the amount to transfer to the provider
-    const feeAmount = (amount * BigInt(this.fee * 1000)) / BigInt(1000); // Parse fee to BigInt to avoid decimal issues
+    const feeBase = 10 ** 6;
+    const feeAmount = (amount * BigInt(this.fee * feeBase)) / BigInt(feeBase); // Parse fee to BigInt to avoid decimal issues
     const amountToTransfer = amount - feeAmount;
     // Transfer the payment to the provider
     return NearPromise.new(this.providerAddress).transfer(amountToTransfer);

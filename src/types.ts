@@ -1,5 +1,3 @@
-export const FEE_MIN = 0.001; // 0.1%
-
 export enum Plan {
   basic = 1,
   standard = 2,
