@@ -1,4 +1,4 @@
-import { PaymentDuration, SubscriptionStatus } from "./types";
+import { SubscriptionStatus } from "./types";
 
 export class Subscription {
   static schema = {
@@ -13,7 +13,7 @@ export class Subscription {
 
   constructor(
     public plan: number, // Basic, Standard, Premium
-    public paymentDuration: PaymentDuration, // Monthly, Yearly
+    public paymentDuration: bigint, // Monthly, Yearly
     public paymentAmount: bigint, // Amount in paymentToken
     public paymentToken: string, // NEAR, USDC, DAI
     public lastPayment: bigint, // Unix timestamp in nanoseconds
@@ -30,7 +30,9 @@ export class Subscription {
   }
 }
 
-export type AddSubscriptionRequest = Omit<
+export interface AddSubscriptionRequest extends Omit<
   Subscription,
-  "lastPayment" | "nextPayment" | "status"
->;
+  "lastPayment" | "nextPayment" | "status" | "paymentDuration"
+> {
+  paymentDuration: string; // Duration in nanoseconds
+}

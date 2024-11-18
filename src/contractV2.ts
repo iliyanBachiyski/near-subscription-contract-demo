@@ -10,14 +10,8 @@ import {
   NearPromise,
 } from "near-sdk-js";
 
-import {
-  DURATION_MAP,
-  PaymentDuration,
-  Plan,
-  SubscriptionStatus,
-} from "./types";
+import { Plan, SubscriptionStatus, FEE_MIN } from "./types";
 import { AddSubscriptionRequest, Subscription } from "./model";
-
 /**
  * Subscription contract that allows users to subscribe to a service provider and make payments based on the subscription plan.
  * Every service provider should deploy to manage their subscription users.
@@ -26,6 +20,7 @@ import { AddSubscriptionRequest, Subscription } from "./model";
 class SubscriptionContract {
   static schema = {
     providerAddress: "string",
+    fee: "number",
     subscriptions: {
       class: LookupMap,
       value: {
@@ -42,11 +37,14 @@ class SubscriptionContract {
 
   subscriptions: LookupMap<Subscription> = new LookupMap<Subscription>("uid-1");
   providerAddress: string = "";
+  fee: number = 0;
 
   @initialize({ privateFunction: true })
-  init({ providerAddress }: { providerAddress: string }) {
+  init({ providerAddress, fee }: { providerAddress: string; fee: number }) {
     // TODO: Validate provider address
     this.providerAddress = providerAddress;
+    assert(fee >= FEE_MIN, `Fee should be bigger or equal to ${FEE_MIN}`);
+    this.fee = fee;
   }
 
   @call({ payableFunction: true })
@@ -67,15 +65,18 @@ class SubscriptionContract {
     assert(blockTimestamp >= nextPayment, "Payment is not due yet");
     const amount = near.attachedDeposit();
     // Assert that the payment amount is correct
-    assert(amount.toString() === paymentAmount.toString(), "Incorrect amount");
+    assert(amount == paymentAmount, "Incorrect amount");
     // Update the last payment and next payment
     this.subscriptions.set(caller, {
       ...subscription,
       lastPayment: blockTimestamp,
-      nextPayment:
-        blockTimestamp + BigInt(DURATION_MAP[paymentDuration].toString()),
+      nextPayment: blockTimestamp + paymentDuration,
     });
-    return NearPromise.new(this.providerAddress).transfer(amount);
+    // Calculate the amount to transfer to the provider
+    const feeAmount = (amount * BigInt(this.fee * 1000)) / BigInt(1000); // Parse fee to BigInt to avoid decimal issues
+    const amountToTransfer = amount - feeAmount;
+    // Transfer the payment to the provider
+    return NearPromise.new(this.providerAddress).transfer(amountToTransfer);
   }
 
   @call({})
@@ -93,11 +94,9 @@ class SubscriptionContract {
     );
     // Assert that the plan is valid
     assert(Object.values(Plan).includes(plan), "Invalid plan");
+    const parsedPaymentDuration = BigInt(paymentDuration);
     // Assert that the paymentDuration is valid
-    assert(
-      Object.values(PaymentDuration).includes(paymentDuration),
-      "Invalid payment duration"
-    );
+    assert(parsedPaymentDuration > 0, "Invalid payment duration");
     assert(
       BigInt(paymentAmount) > 0,
       "Payment amount should be greater than 0"
@@ -107,11 +106,11 @@ class SubscriptionContract {
     const blockTimestamp = near.blockTimestamp();
     const subscription = new Subscription(
       plan,
-      paymentDuration,
+      parsedPaymentDuration,
       paymentAmount,
       paymentToken,
       blockTimestamp,
-      blockTimestamp + BigInt(DURATION_MAP[paymentDuration].toString()),
+      blockTimestamp + parsedPaymentDuration,
       SubscriptionStatus.active
     );
     this.subscriptions.set(caller, subscription);
@@ -146,5 +145,10 @@ class SubscriptionContract {
   @view({})
   get_provider_address(): string {
     return this.providerAddress;
+  }
+
+  @view({})
+  get_fee(): number {
+    return this.fee;
   }
 }

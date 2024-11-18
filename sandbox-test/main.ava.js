@@ -1,10 +1,7 @@
 import anyTest from "ava";
-import { Worker, NEAR } from "near-workspaces";
 import { setDefaultResultOrder } from "dns";
+import { NEAR, Worker } from "near-workspaces";
 setDefaultResultOrder("ipv4first"); // temp fix for node >v17
-
-const MONTH_DURATION = 30 * 24 * 60 * 60 * 1000 * 1000 * 1000; // 30 days in nanoseconds
-const YEAR_DURATION = 365 * 24 * 60 * 60 * 1000 * 1000 * 1000; // 365 days in nanoseconds
 
 // Initialize beneficiary
 const validPrices = {
@@ -110,25 +107,27 @@ test("Read supported tokens", async (t) => {
 
 test("Add subscription", async (t) => {
   const { alice, contract } = t.context.accounts;
-  await alice.call(contract, "add_subscription", {
+  const subscriptionData = {
     plan: 3,
-    paymentDuration: 2,
-  });
+    paymentDuration: "2"
+  }
+  await alice.call(contract, "add_subscription", subscriptionData);
   const subscription = await contract.view("get_account_subscription", {
     account: alice.accountId,
   });
   t.is(subscription.status, 1);
   t.is(subscription.plan, 3);
-  t.is(subscription.paymentDuration, 2);
-  t.is(subscription.nextPayment - subscription.lastPayment, YEAR_DURATION);
+  t.is(subscription.paymentDuration, subscriptionData.paymentDuration);
+  t.is(BigInt(subscription.nextPayment) - BigInt(subscription.lastPayment), BigInt(subscriptionData.paymentDuration));
 });
 
 test("Remove subscription", async (t) => {
   const { alice, contract } = t.context.accounts;
-  await alice.call(contract, "add_subscription", {
+  const subscriptionData = {
     plan: 3,
-    paymentDuration: 2,
-  });
+    paymentDuration: "2"
+  }
+  await alice.call(contract, "add_subscription", subscriptionData);
   let subscription = await contract.view("get_account_subscription", {
     account: alice.accountId,
   });

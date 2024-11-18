@@ -1,15 +1,4 @@
-const MONTH_DURATION = 30 * 24 * 60 * 60 * 1000 * 1000 * 1000; // 30 days in nanoseconds
-const YEAR_DURATION = 365 * 24 * 60 * 60 * 1000 * 1000 * 1000; // 365 days in nanoseconds
-
-export enum PaymentDuration {
-  month = 1,
-  year = 2,
-}
-
-export const DURATION_MAP = {
-  [PaymentDuration.month]: MONTH_DURATION,
-  [PaymentDuration.year]: YEAR_DURATION,
-};
+export const FEE_MIN = 0.001; // 0.1%
 
 export enum Plan {
   basic = 1,
@@ -28,12 +17,12 @@ export enum SubscriptionStatus {
 
 export type AddSubscriptionRequest = {
   plan: Plan;
-  paymentDuration: PaymentDuration;
+  paymentDuration: string; // Duration in nanoseconds
 };
 
 export type SubscriptionType = {
   plan: Plan;
-  paymentDuration: PaymentDuration;
+  paymentDuration: bigint; // Duration in nanoseconds. Indicates when the next payment should be done
   lastPayment: bigint; // Unix timestamp in nanoseconds
   nextPayment: bigint; // Unix timestamp in nanoseconds
   status: SubscriptionStatus;

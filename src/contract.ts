@@ -14,9 +14,7 @@ import {
   PriceType,
   AddSubscriptionRequest,
   Plan,
-  PaymentDuration,
   SubscriptionStatus,
-  DURATION_MAP,
 } from "./types";
 
 @NearBindgen({})
@@ -86,8 +84,9 @@ class Subscription {
     // Assert that the plan is valid
     assert(Object.values(Plan).includes(plan), "Invalid plan");
     // Assert that the paymentDuration is valid
+    const parsedPaymentDuration = BigInt(paymentDuration);
     assert(
-      Object.values(PaymentDuration).includes(paymentDuration),
+      parsedPaymentDuration > 0,
       "Invalid payment duration"
     );
     // Assert that the plan is supported
@@ -96,10 +95,10 @@ class Subscription {
     const blockTimestamp = near.blockTimestamp();
     const subscription: SubscriptionType = {
       plan,
-      paymentDuration,
+      paymentDuration: parsedPaymentDuration,
       lastPayment: blockTimestamp,
       nextPayment:
-        blockTimestamp + BigInt(DURATION_MAP[paymentDuration].toString()),
+      blockTimestamp + parsedPaymentDuration,
       status: SubscriptionStatus.active,
     };
     this.subscriptions.set(caller, subscription);
