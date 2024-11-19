@@ -12,6 +12,11 @@ import {
 
 import { Plan, SubscriptionStatus } from "./types";
 import { AddSubscriptionRequest, Subscription } from "./model";
+
+const MAX_PERCENTAGE = 100;
+const MIN_PERCENTAGE = 0.01;
+const PERCENTAGE_BASE = 10000; // Represents 100%
+
 /**
  * Subscription contract that allows users to subscribe to a service provider and make payments based on the subscription plan.
  * Every service provider should deploy to manage their subscription users.
@@ -43,6 +48,8 @@ class SubscriptionContract {
   init({ providerAddress, fee }: { providerAddress: string; fee: number }) {
     // TODO: Validate provider address
     this.providerAddress = providerAddress;
+    // Assert that the fee is within the range
+    assert(fee >= MIN_PERCENTAGE && fee <= MAX_PERCENTAGE, "Invalid fee");
     this.fee = fee;
   }
 
@@ -72,8 +79,8 @@ class SubscriptionContract {
       nextPayment: blockTimestamp + paymentDuration,
     });
     // Calculate the amount to transfer to the provider
-    const feeBase = 10 ** 6;
-    const feeAmount = (amount * BigInt(this.fee * feeBase)) / BigInt(feeBase); // Parse fee to BigInt to avoid decimal issues
+    const feeAmount =
+      (amount * BigInt(this.fee * PERCENTAGE_BASE)) / BigInt(PERCENTAGE_BASE); // Parse fee to BigInt to avoid decimal issues
     const amountToTransfer = amount - feeAmount;
     // Transfer the payment to the provider
     return NearPromise.new(this.providerAddress).transfer(amountToTransfer);
@@ -116,7 +123,7 @@ class SubscriptionContract {
     this.subscriptions.set(caller, subscription);
   }
 
-  @call({ privateFunction: true })
+  @call({})
   remove_subscription() {
     const caller = near.predecessorAccountId();
     // Assert that the caller has a subscription

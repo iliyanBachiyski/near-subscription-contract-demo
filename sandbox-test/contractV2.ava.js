@@ -1,5 +1,4 @@
 import anyTest from "ava";
-import { assert } from "console";
 import { setDefaultResultOrder } from "dns";
 import { BN, DECIMALS, NEAR, Worker } from "near-workspaces";
 setDefaultResultOrder("ipv4first"); // temp fix for node >v17
