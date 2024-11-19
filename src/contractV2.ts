@@ -8,6 +8,8 @@ import {
   view,
   initialize,
   NearPromise,
+  validateAccountId,
+  AccountId,
 } from "near-sdk-js";
 
 import { Plan, SubscriptionStatus } from "./types";
@@ -41,12 +43,12 @@ class SubscriptionContract {
   };
 
   subscriptions: LookupMap<Subscription> = new LookupMap<Subscription>("uid-1");
-  providerAddress: string = "";
+  providerAddress: AccountId = "";
   fee: number = 0;
 
   @initialize({ privateFunction: true })
-  init({ providerAddress, fee }: { providerAddress: string; fee: number }) {
-    // TODO: Validate provider address
+  init({ providerAddress, fee }: { providerAddress: AccountId; fee: number }) {
+    assert(validateAccountId(providerAddress), "Invalid provider address");
     this.providerAddress = providerAddress;
     // Assert that the fee is within the range
     assert(fee >= MIN_PERCENTAGE && fee <= MAX_PERCENTAGE, "Invalid fee");
