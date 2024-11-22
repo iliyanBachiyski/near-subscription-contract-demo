@@ -25,3 +25,12 @@ export type SubscriptionType = {
   nextPayment: bigint; // Unix timestamp in nanoseconds
   status: SubscriptionStatus;
 };
+
+export type SubscriptionPlan = {
+  id: string;
+  name: string;
+  duration: bigint;
+  amount: bigint;
+  token: string;
+  isActive: boolean;
+};

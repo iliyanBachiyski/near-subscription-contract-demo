@@ -1,128 +1,219 @@
 // Find all our documentation at https://docs.near.org
 import {
-  LookupMap,
-  NearBindgen,
+  AccountId,
   assert,
   call,
-  near,
-  view,
   initialize,
+  LookupMap,
+  near,
+  NearBindgen,
   NearPromise,
   validateAccountId,
-  AccountId,
+  view,
+  Vector,
 } from "near-sdk-js";
 
-import { Plan, SubscriptionStatus } from "./types";
-import { AddSubscriptionRequest, Subscription } from "./model";
+import { Subscription } from "./model";
+import { SubscriptionStatus, SubscriptionPlan } from "./types";
 
-const MAX_PERCENTAGE = 100;
-const MIN_PERCENTAGE = 0.01;
-const PERCENTAGE_BASE = 10000; // Represents 100%
+// Fee-related constants
+const BASIS_POINTS = 10000; // 100.00% = 10000 basis points
+const MAX_BPS = 10000; // 100.00%
+const MIN_BPS = 1; // 0.01%
+
+// FT-related constants
+const FT_STORAGE_DEPOSIT = BigInt("12500000000000000000000"); // 0.0125 NEAR required for FT storage
+const FT_TRANSFER_GAS = BigInt("10000000000000"); // 10 TGas for FT transfers
+const FT_TRANSFER_DEPOSIT = BigInt("1"); // 1 yoctoNEAR required for FT transfers
 
 /**
  * Subscription contract that allows users to subscribe to a service provider and make payments based on the subscription plan.
  * Every service provider should deploy to manage their subscription users.
  */
 @NearBindgen({})
-class SubscriptionContract {
-  static schema = {
-    providerAddress: "string",
-    fee: "number",
-    subscriptions: {
-      class: LookupMap,
-      value: {
-        plan: "number",
-        paymentDuration: "bigint",
-        paymentAmount: "bigint",
-        paymentToken: "string",
-        lastPayment: "bigint",
-        nextPayment: "bigint",
-        status: "number",
-      },
-    },
-  };
+export class SubscriptionContract {
+  private plans: LookupMap<SubscriptionPlan>;
+  private planIds: Vector<string>;
+  private subscriptions: LookupMap<Subscription>;
+  private providerAddress: AccountId;
+  private fee: number;
 
-  subscriptions: LookupMap<Subscription> = new LookupMap<Subscription>("uid-1");
-  providerAddress: AccountId = "";
-  fee: number = 0;
-
-  @initialize({ privateFunction: true })
-  init({ providerAddress, fee }: { providerAddress: AccountId; fee: number }) {
-    assert(validateAccountId(providerAddress), "Invalid provider address");
-    this.providerAddress = providerAddress;
-    // Assert that the fee is within the range
-    assert(fee >= MIN_PERCENTAGE && fee <= MAX_PERCENTAGE, "Invalid fee");
-    this.fee = fee;
+  constructor() {
+    this.plans = new LookupMap<SubscriptionPlan>("plans_plans");
+    this.planIds = new Vector<string>("plans_ids");
+    this.subscriptions = new LookupMap<Subscription>("subscriptions");
+    this.providerAddress = "";
+    this.fee = 0;
   }
 
-  @call({ payableFunction: true })
-  pay_subscription() {
-    const caller = near.predecessorAccountId();
-    // Assert that the caller has a subscription
+  @initialize({ privateFunction: true })
+  init({
+    providerAddress,
+    fee,
+    initialPlans,
+  }: {
+    providerAddress: AccountId;
+    fee: number;
+    initialPlans: SubscriptionPlan[];
+  }) {
+    assert(validateAccountId(providerAddress), "Invalid provider address");
     assert(
-      this.subscriptions.containsKey(caller),
-      "Subscription does not exists"
+      fee >= MIN_BPS && fee <= MAX_BPS,
+      `Fee must be between ${MIN_BPS} (0.01%) and ${MAX_BPS} (100.00%) basis points`
     );
-    const subscription = this.subscriptions.get(caller);
-    const { status, nextPayment, paymentDuration, paymentAmount } =
-      subscription;
-    // Assert that the subscription is active
-    assert(status === SubscriptionStatus.active, "Subscription is not active");
-    const blockTimestamp = near.blockTimestamp();
-    // Assert that the next payment is due
-    assert(blockTimestamp >= nextPayment, "Payment is not due yet");
-    const amount = near.attachedDeposit();
-    // Assert that the payment amount is correct
-    assert(amount == paymentAmount, "Incorrect amount");
-    // Update the last payment and next payment
-    this.subscriptions.set(caller, {
-      ...subscription,
-      lastPayment: blockTimestamp,
-      nextPayment: blockTimestamp + paymentDuration,
-    });
-    // Calculate the amount to transfer to the provider
-    const feeAmount =
-      (amount * BigInt(this.fee * PERCENTAGE_BASE)) / BigInt(PERCENTAGE_BASE); // Parse fee to BigInt to avoid decimal issues
-    const amountToTransfer = amount - feeAmount;
-    // Transfer the payment to the provider
-    return NearPromise.new(this.providerAddress).transfer(amountToTransfer);
+    assert(initialPlans.length > 0, "At least one plan is required");
+
+    this.providerAddress = providerAddress;
+    this.fee = fee;
+
+    // Add initial plans
+    for (const plan of initialPlans) {
+      this.add_plan(plan);
+    }
+  }
+
+  // Plan Management - Write Methods
+  @call({})
+  add_plan(params: SubscriptionPlan) {
+    this.assertProviderOrOwner();
+    const { id, name, duration, amount, token } = params;
+
+    assert(!this.plans.get(id), "Plan already exists");
+    this.validateToken(token);
+
+    const plan = {
+      id,
+      name,
+      duration: BigInt(duration),
+      amount: BigInt(amount),
+      token,
+      isActive: true,
+    };
+
+    this.plans.set(id, plan);
+    this.planIds.push(id);
   }
 
   @call({})
-  add_subscription({
-    plan,
-    paymentDuration,
-    paymentAmount,
-    paymentToken,
-  }: AddSubscriptionRequest) {
+  update_plan(params: {
+    id: string;
+    name?: string;
+    duration?: string;
+    amount?: string;
+    token?: string;
+    isActive?: boolean;
+  }) {
+    this.assertProviderOrOwner();
+    const plan = this.plans.get(params.id);
+    assert(plan, "Plan does not exist");
+
+    if (params.token) {
+      this.validateToken(params.token);
+    }
+
+    const updatedPlan = {
+      ...plan,
+      name: params.name ?? plan.name,
+      duration: params.duration ? BigInt(params.duration) : plan.duration,
+      amount: params.amount ? BigInt(params.amount) : plan.amount,
+      token: params.token ?? plan.token,
+      isActive: params.isActive ?? plan.isActive,
+    };
+
+    this.plans.set(params.id, updatedPlan);
+  }
+
+  @call({})
+  remove_plan({ id }: { id: string }) {
+    this.assertProviderOrOwner();
+    assert(this.plans.get(id), "Plan does not exist");
+    this.update_plan({ id, isActive: false });
+  }
+
+  // Subscription Management - Write Methods
+  @call({ payableFunction: true })
+  add_subscription({ planId }: { planId: string }) {
     const caller = near.predecessorAccountId();
-    // Assert that subscription does not exist
     assert(
       !this.subscriptions.containsKey(caller),
       "Subscription already exists"
     );
-    // Assert that the plan is valid
-    assert(Object.values(Plan).includes(plan), "Invalid plan");
-    const parsedPaymentDuration = BigInt(paymentDuration);
-    // Assert that the paymentDuration is valid
-    assert(parsedPaymentDuration > 0, "Invalid payment duration");
-    assert(
-      BigInt(paymentAmount) > 0,
-      "Payment amount should be greater than 0"
-    );
-    // TODO: probably need to validate payment token somehow
-    // TODO: Probably initial payment should be done here
+
+    const plan = this.validatePlan(planId);
     const blockTimestamp = near.blockTimestamp();
-    const subscription = new Subscription(
-      plan,
-      parsedPaymentDuration,
-      paymentAmount,
-      paymentToken,
-      blockTimestamp,
-      blockTimestamp + parsedPaymentDuration,
-      SubscriptionStatus.active
-    );
-    this.subscriptions.set(caller, subscription);
+
+    if (plan.token === "near") {
+      // For NEAR payments, verify attached deposit matches payment amount
+      assert(
+        near.attachedDeposit() === plan.amount,
+        "Attached deposit must match plan amount"
+      );
+
+      // Calculate fee and provider amount
+      const feeAmount = this.calculateFee(plan.amount);
+      const amountToTransfer = plan.amount - feeAmount;
+
+      // Create subscription in active state
+      const subscription = new Subscription(
+        planId,
+        plan.duration,
+        plan.amount,
+        plan.token,
+        blockTimestamp,
+        blockTimestamp + plan.duration,
+        SubscriptionStatus.active
+      );
+
+      this.subscriptions.set(caller, subscription);
+
+      // Transfer initial payment to provider
+      return NearPromise.new(this.providerAddress).transfer(amountToTransfer);
+    } else {
+      // For FT payments
+      assert(
+        near.attachedDeposit() >= BigInt(FT_STORAGE_DEPOSIT),
+        "Not enough deposit for FT storage setup"
+      );
+
+      // Register contract with FT token
+      const storagePromise = NearPromise.new(plan.token).functionCall(
+        "storage_deposit",
+        JSON.stringify({ account_id: near.currentAccountId() }),
+        near.attachedDeposit(),
+        FT_TRANSFER_GAS
+      );
+
+      // Calculate fee and provider amount
+      const feeAmount = this.calculateFee(plan.amount);
+      const amountToTransfer = plan.amount - feeAmount;
+
+      // Create subscription in active state
+      const subscription = new Subscription(
+        planId,
+        plan.duration,
+        plan.amount,
+        plan.token,
+        blockTimestamp,
+        blockTimestamp + plan.duration,
+        SubscriptionStatus.active
+      );
+
+      this.subscriptions.set(caller, subscription);
+
+      // Transfer FT tokens to provider
+      const transferPromise = NearPromise.new(plan.token).functionCall(
+        "ft_transfer_call",
+        JSON.stringify({
+          receiver_id: this.providerAddress,
+          amount: amountToTransfer.toString(),
+          msg: "",
+        }),
+        FT_TRANSFER_DEPOSIT,
+        FT_TRANSFER_GAS
+      );
+
+      return storagePromise.then(transferPromise);
+    }
   }
 
   @call({})
@@ -141,16 +232,88 @@ class SubscriptionContract {
     this.subscriptions.get(caller).status = SubscriptionStatus.inactive;
   }
 
+  @call({ payableFunction: true })
+  pay_subscription() {
+    const caller = near.predecessorAccountId();
+    assert(
+      this.subscriptions.containsKey(caller),
+      "Subscription does not exists"
+    );
+
+    const subscription = this.subscriptions.get(caller);
+    assert(
+      subscription.status === SubscriptionStatus.active,
+      "Subscription is not active"
+    );
+
+    // Get the plan to verify current amounts and token
+    const plan = this.validatePlan(subscription.planId);
+
+    const blockTimestamp = near.blockTimestamp();
+    assert(
+      blockTimestamp >= subscription.nextPayment,
+      "Payment is not due yet"
+    );
+
+    if (plan.token === "near") {
+      // For NEAR payments
+      assert(
+        near.attachedDeposit() === plan.amount,
+        "Attached deposit must match plan amount"
+      );
+
+      // Calculate fee and provider amount
+      const feeAmount = this.calculateFee(plan.amount);
+      const amountToTransfer = plan.amount - feeAmount;
+
+      // Update subscription next payment date
+      this.subscriptions.set(caller, {
+        ...subscription,
+        lastPayment: blockTimestamp,
+        nextPayment: blockTimestamp + plan.duration,
+      });
+
+      // Transfer payment to provider
+      return NearPromise.new(this.providerAddress).transfer(amountToTransfer);
+    } else {
+      // For FT payments
+      assert(
+        near.attachedDeposit() >= BigInt(FT_TRANSFER_DEPOSIT),
+        "Requires attached deposit of at least 1 yoctoNEAR"
+      );
+
+      // Calculate fee and provider amount
+      const feeAmount = this.calculateFee(plan.amount);
+      const amountToTransfer = plan.amount - feeAmount;
+
+      // Update subscription next payment date
+      this.subscriptions.set(caller, {
+        ...subscription,
+        lastPayment: blockTimestamp,
+        nextPayment: blockTimestamp + plan.duration,
+      });
+
+      // Transfer FT tokens to provider
+      return NearPromise.new(plan.token).functionCall(
+        "ft_transfer_call",
+        JSON.stringify({
+          receiver_id: this.providerAddress,
+          amount: amountToTransfer.toString(),
+          msg: "",
+        }),
+        FT_TRANSFER_DEPOSIT,
+        FT_TRANSFER_GAS
+      );
+    }
+  }
+
+  // Subscription Management - View Methods
   @view({})
   get_account_subscription({ address }: { address: string }): Subscription {
     return this.subscriptions.get(address);
   }
 
-  @view({})
-  get_storage(): bigint {
-    return near.storageUsage();
-  }
-
+  // Contract Information - View Methods
   @view({})
   get_provider_address(): string {
     return this.providerAddress;
@@ -159,5 +322,58 @@ class SubscriptionContract {
   @view({})
   get_fee(): number {
     return this.fee;
+  }
+
+  @view({})
+  get_storage(): bigint {
+    return near.storageUsage();
+  }
+
+  // Plan Management - View Methods
+  @view({})
+  get_plan({ id }: { id: string }): SubscriptionPlan | null {
+    return this.plans.get(id);
+  }
+
+  @view({})
+  get_active_plans(): SubscriptionPlan[] {
+    const plans: SubscriptionPlan[] = [];
+    const totalPlans = this.planIds.length;
+    for (let i = 0; i < totalPlans; i++) {
+      const id = this.planIds.get(i);
+      const plan = this.plans.get(id);
+      if (plan.isActive) {
+        plans.push(plan);
+      }
+    }
+    return plans;
+  }
+
+  // Private Helper Methods
+  private calculateFee(amount: bigint): bigint {
+    return (amount * BigInt(this.fee)) / BigInt(BASIS_POINTS);
+  }
+
+  private assertProviderOrOwner() {
+    const caller = near.predecessorAccountId();
+    assert(
+      caller === this.providerAddress || caller === near.currentAccountId(),
+      "Only contract owner or provider can perform this action"
+    );
+  }
+
+  private validatePlan(planId: string): SubscriptionPlan {
+    const plan = this.get_plan({ id: planId });
+    assert(plan !== null, "Plan does not exist");
+    assert(plan.isActive, "Plan is not active");
+    return plan;
+  }
+
+  private validateToken(token: string): void {
+    const normalizedToken = token.toLowerCase();
+    assert(
+      normalizedToken === "near" || validateAccountId(token),
+      `Invalid token address: ${token}. Must be 'near' or a valid contract account ID`
+    );
   }
 }
